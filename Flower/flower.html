@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Для тебя</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #05030a; overflow: hidden;
+    touch-action: none;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .text {
+    position: fixed; left: 0; right: 0; bottom: 5vh;
+    text-align: center; padding: 0 20px;
+    pointer-events: none;
+  }
+  .title {
+    color: #ff4d6d; font-size: clamp(24px, 5vw, 38px);
+    letter-spacing: 6px; font-weight: 300; min-height: 1.3em;
+    text-shadow: 0 0 14px rgba(255, 77, 109, .9), 0 0 40px rgba(255, 77, 109, .4);
+  }
+  .line {
+    color: #ffc2cf; font-size: clamp(14px, 2.6vw, 19px);
+    letter-spacing: 2px; font-weight: 300; margin-top: 10px; min-height: 1.4em;
+    font-style: italic;
+    text-shadow: 0 0 10px rgba(255, 150, 175, .6);
+  }
+  .cursor::after { content: '|'; margin-left: 2px; animation: blink 0.8s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="text">
+  <div class="title" id="title"></div>
+  <div class="line" id="l1"></div>
+  <div class="line" id="l2"></div>
+</div>
+
+<script>
+/* ============ ТУТ МЕНЯЕШЬ ТЕКСТ ============ */
+const CONFIG = {
+  title: 'Для тебе 🤍',
+  lines: [
+    'Ти — найкрасивіше, що є в моєму житті',
+    'Дякую що ти є'
+  ]
+};
+/* ============================================ */
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const rand = Math.random;
+const lerp = (a, b, t) => a + (b - a) * t;
+const q = v => Math.max(0, Math.min(255, Math.round(v / 10) * 10));
+
+let W, H, dpr, cx, groundY, bloomY, R, Hb, budBaseY;
+let groups, stars, flies, petals, t0, typeTimers = [], pointer = null;
+let lastPetal = 0;
+
+function stemCurve(t) { return Math.sin(t * Math.PI * 1.3) * R * 0.14; }
+
+function setup() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  cx = W / 2;
+  groundY = H * 0.80;
+  bloomY = H * 0.30;
+  R = Math.min(W * 0.2, H * 0.12);
+  Hb = R * 1.55;
+  budBaseY = bloomY + Hb * 0.55;
+
+  const K = W < 600 ? 0.7 : 1;
+  const all = [];
+  const mk = (sx, sy, tx, ty, color, delay, dur, size, hf, wob) =>
+    all.push({ sx, sy, tx, ty, color, delay, dur, size, hf, wob: wob || 0,
+      ph: rand() * 6.28, ox: 0, oy: 0, vx: 0, vy: 0 });
+
+  /* --- Стебель --- */
+  const nStem = Math.floor(1500 * K);
+  for (let i = 0; i < nStem; i++) {
+    const t = rand();
+    const y = groundY - t * (groundY - budBaseY);
+    const x = cx + stemCurve(t) + (rand() - 0.5) * 3.4;
+    const col = rand() > 0.35 ? '#1f5c33' : (rand() > 0.5 ? '#2e8b57' : '#174826');
+    mk(cx, groundY, x, y, col, t * 2400 + rand() * 120, 800, 1 + rand() * 1.1, t, 6);
+  }
+
+  /* --- Шипы --- */
+  [0.15, 0.37, 0.6, 0.82].forEach((tt, k) => {
+    const side = k % 2 ? 1 : -1;
+    const bx = cx + stemCurve(tt), by = groundY - tt * (groundY - budBaseY);
+    for (let i = 0; i < 28; i++) {
+      const u = rand();
+      const x = bx + side * u * 9;
+      const y = by - u * 5 + (rand() - 0.5) * (1 - u) * 4;
+      mk(bx, by, x, y, '#6fcf97', tt * 2400 + 500 + rand() * 200, 500, 1 + rand(), tt, 2);
+    }
+  });
+
+  /* --- Листья (с прожилками) --- */
+  const leaves = [
+    { tt: 0.26, side: -1, len: R * 1.55 },
+    { tt: 0.48, side: 1,  len: R * 1.85 },
+    { tt: 0.70, side: -1, len: R * 1.35 }
+  ];
+  leaves.forEach(lf => {
+    const bx = cx + stemCurve(lf.tt), by = groundY - lf.tt * (groundY - budBaseY);
+    const dx = lf.side * Math.cos(0.5), dy = -Math.sin(0.5);
+    const px = -dy, py = dx;
+    const Lw = lf.len * 0.27;
+    const n = Math.floor(750 * K);
+    for (let i = 0; i < n; i++) {
+      const u = rand(), v = rand() * 2 - 1;
+      const w = Lw * Math.pow(Math.sin(Math.PI * Math.min(u, 0.999)), 0.9) * (1 - 0.25 * u);
+      const droop = u * u * lf.len * 0.28;
+      const x = bx + dx * u * lf.len + px * v * w;
+      const y = by + dy * u * lf.len + py * v * w + droop;
+      let col;
+      const av = Math.abs(v);
+      if (av < 0.035) col = '#a8f0bc';
+      else if ((((u * 7 - av * 3) % 1) + 1) % 1 < 0.07) col = '#63d48e';
+      else {
+        const g = 120 + (1 - av) * 70;
+        col = `rgb(${q(30 + (1 - av) * 30)},${q(g)},${q(70 + (1 - av) * 30)})`;
+      }
+      mk(bx, by, x, y, col, lf.tt * 2400 + 300 + u * 600 + rand() * 80, 900, 1 + rand() * 1.1, lf.tt + u * 0.05, 5);
+    }
+  });
+
+  /* --- Чашелистики под бутоном --- */
+  const nCal = Math.floor(380 * K);
+  for (let i = 0; i < nCal; i++) {
+    const tt = rand();
+    const x = cx + (rand() * 2 - 1) * R * 0.44 * (1 - tt * 0.75);
+    const y = budBaseY - R * 0.14 + tt * R * 0.32;
+    const col = rand() > 0.5 ? '#2e8b57' : '#3cb371';
+    mk(cx, budBaseY, x, y, col, 2700 + rand() * 600, 900, 1 + rand() * 1.1, 0.98, 4);
+  }
+
+  /* --- Бутон розы: слои лепестков --- */
+  const L = 6;
+  const nBud = Math.floor(5200 * K);
+  for (let i = 0; i < nBud; i++) {
+    const l = Math.floor(rand() * L);
+    const m = l / (L - 1);
+    const rl = R * (0.4 + 0.6 * m);
+    const nPet = 3 + (l % 2);
+    const pIdx = Math.floor(rand() * nPet);
+    const width = (Math.PI * 2 / nPet) * 1.2;
+    const a0 = pIdx * (Math.PI * 2 / nPet) + l * 1.1;
+    const u = rand(), v = Math.pow(rand(), 0.85);
+    const ang = a0 + (u - 0.5) * width;
+    const flare = Math.max(0, (v - 0.78) / 0.22);
+    const rr = rl * (0.55 + 0.45 * Math.pow(v, 0.7)) + rl * 0.16 * flare * flare;
+    const Hl = Hb * (0.55 + 0.45 * m);
+    const x = cx + Math.cos(ang) * rr;
+    const y = budBaseY - v * Hl + Math.sin(ang) * rr * 0.28;
+
+    let r = lerp(95, 225, m) + (rand() - 0.5) * 40;
+    let g = lerp(0, 18, m) + rand() * 10;
+    let b = lerp(12, 55, m) + rand() * 15;
+    const shade = (0.55 + 0.45 * v) * (0.85 + 0.25 * Math.cos(ang + 2.4));
+    r *= shade; g *= shade; b *= shade;
+    if (v > 0.9 && rand() < 0.5) { r = 255; g = 90 + rand() * 40; b = 120 + rand() * 40; }
+    const col = `rgb(${q(r)},${q(g)},${q(b)})`;
+
+    const sa = rand() * 6.28, sr = R * (1.6 + rand() * 2.6);
+    mk(cx + Math.cos(sa) * sr, bloomY + Math.sin(sa) * sr, x, y, col,
+       2900 + rand() * 2300, 1500, 1.1 + rand() * 1.2, 1, 14);
+  }
+
+  /* --- Спираль в центре бутона --- */
+  const nC = Math.floor(650 * K);
+  const topY = budBaseY - Hb * 0.9;
+  for (let i = 0; i < nC; i++) {
+    const t = rand();
+    const ang = i * 2.39996;
+    const rr = R * 0.6 * Math.sqrt(t);
+    const x = cx + Math.cos(ang) * rr;
+    const y = topY + Math.sin(ang) * rr * 0.3 + (1 - t) * 3;
+    const c = 55 + t * 100;
+    const col = `rgb(${q(c)},${q(rand() * 10)},${q(15 + t * 25)})`;
+    const sa = rand() * 6.28, sr = R * (1.5 + rand() * 2);
+    mk(cx + Math.cos(sa) * sr, bloomY + Math.sin(sa) * sr, x, y, col,
+       4300 + rand() * 1800, 1400, 1 + rand() * 1.1, 1, 12);
+  }
+
+  /* --- группировка по цвету (быстрая отрисовка) --- */
+  groups = new Map();
+  all.forEach(p => {
+    if (!groups.has(p.color)) groups.set(p.color, []);
+    groups.get(p.color).push(p);
+  });
+
+  /* --- Звёзды и светлячки --- */
+  stars = Array.from({ length: Math.floor(W * H / 6000) }, () => ({
+    x: rand() * W, y: rand() * H, s: rand() * 1.3 + 0.3, ph: rand() * 6.28, sp: 0.001 + rand() * 0.002
+  }));
+  flies = Array.from({ length: W < 600 ? 28 : 55 }, () => ({
+    x: rand() * W, y: rand() * H, s: rand() * 2 + 1, sp: 0.15 + rand() * 0.35,
+    ph: rand() * 6.28, hue: rand() > 0.5 ? '255,120,150' : '255,200,210'
+  }));
+  petals = [];
+  lastPetal = 0;
+
+  t0 = performance.now();
+  startTyping();
+}
+
+/* ---------- Печатающийся текст ---------- */
+function typeInto(el, text, speed, done) {
+  let i = 0;
+  el.classList.add('cursor');
+  const chars = Array.from(text);
+  const step = () => {
+    el.textContent = chars.slice(0, ++i).join('');
+    if (i < chars.length) typeTimers.push(setTimeout(step, speed));
+    else { el.classList.remove('cursor'); done && done(); }
+  };
+  step();
+}
+function startTyping() {
+  typeTimers.forEach(clearTimeout); typeTimers = [];
+  const title = document.getElementById('title');
+  const l1 = document.getElementById('l1');
+  const l2 = document.getElementById('l2');
+  title.textContent = l1.textContent = l2.textContent = '';
+  typeTimers.push(setTimeout(() => {
+    typeInto(title, CONFIG.title, 120, () => {
+      typeTimers.push(setTimeout(() => {
+        typeInto(l1, CONFIG.lines[0] || '', 55, () => {
+          typeTimers.push(setTimeout(() => typeInto(l2, CONFIG.lines[1] || '', 60), 500));
+        });
+      }, 600));
+    });
+  }, 6200));
+}
+
+/* ---------- Главный цикл ---------- */
+function frame(now) {
+  const t = now - t0;
+
+  ctx.fillStyle = '#05030a';
+  ctx.fillRect(0, 0, W, H);
+
+  // звёзды
+  ctx.fillStyle = '#fff';
+  for (const s of stars) {
+    ctx.globalAlpha = 0.25 + 0.5 * (0.5 + 0.5 * Math.sin(t * s.sp + s.ph));
+    ctx.fillRect(s.x, s.y, s.s, s.s);
+  }
+  ctx.globalAlpha = 1;
+
+  // пульсирующее свечение за бутоном (как сердцебиение)
+  const bloomK = Math.max(0, Math.min(1, (t - 3500) / 3500));
+  if (bloomK > 0) {
+    const beat = Math.pow(Math.max(0, Math.sin(t * 0.004)), 6);
+    const rad = R * (3.6 + beat * 0.5);
+    const g = ctx.createRadialGradient(cx, bloomY, 0, cx, bloomY, rad);
+    g.addColorStop(0, `rgba(255,40,90,${(0.22 + beat * 0.1) * bloomK})`);
+    g.addColorStop(0.5, `rgba(200,20,70,${0.08 * bloomK})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // светлячки
+  ctx.globalCompositeOperation = 'lighter';
+  for (const f of flies) {
+    f.y -= f.sp; f.x += Math.sin(t * 0.001 + f.ph) * 0.3;
+    if (f.y < -10) { f.y = H + 10; f.x = rand() * W; }
+    const a = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(t * 0.003 + f.ph));
+    const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.s * 5);
+    g.addColorStop(0, `rgba(${f.hue},${a})`);
+    g.addColorStop(1, `rgba(${f.hue},0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(f.x - f.s * 5, f.y - f.s * 5, f.s * 10, f.s * 10);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // растение из частиц
+  const sway = (Math.sin(t * 0.0009) * R * 0.06 + Math.sin(t * 0.0023) * R * 0.015);
+  const rad = 80, rad2 = rad * rad;
+  for (const [color, arr] of groups) {
+    ctx.fillStyle = color;
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      const k = (t - p.delay) / p.dur;
+      if (k <= 0) continue;
+      const pr = k > 1 ? 1 : k;
+      const e = 1 - Math.pow(1 - pr, 3);
+      let x = p.sx + (p.tx - p.sx) * e;
+      let y = p.sy + (p.ty - p.sy) * e;
+      if (pr < 1) {
+        const w = (1 - e) * p.wob;
+        x += Math.sin(p.ph + t * 0.005) * w;
+        y += Math.cos(p.ph + t * 0.004) * w;
+      }
+      x += sway * p.hf * p.hf + Math.sin(t * 0.002 + p.ph) * 0.5;
+      y += Math.cos(t * 0.0025 + p.ph) * 0.5;
+
+      if (pointer) {
+        const dx = x - pointer.x, dy = y - pointer.y, d2 = dx * dx + dy * dy;
+        if (d2 < rad2 && d2 > 0.01) {
+          const d = Math.sqrt(d2), f = (1 - d / rad) * 2.4;
+          p.vx += dx / d * f; p.vy += dy / d * f;
+        }
+      }
+      p.vx -= p.ox * 0.05; p.vy -= p.oy * 0.05;
+      p.vx *= 0.86; p.vy *= 0.86;
+      p.ox += p.vx; p.oy += p.vy;
+      x += p.ox; y += p.oy;
+
+      const s = p.size * (pr < 0.3 ? pr / 0.3 : 1);
+      ctx.fillRect(x - s / 2, y - s / 2, s, s);
+    }
+  }
+
+  // падающие лепестки
+  if (t > 7200 && t - lastPetal > 1100) {
+    lastPetal = t;
+    petals.push({
+      x: cx + (rand() - 0.5) * R * 1.3 + sway,
+      y: budBaseY - Hb * 0.5,
+      vy: 0.35 + rand() * 0.4, size: R * (0.07 + rand() * 0.05),
+      rot: rand() * 6.28, rs: (rand() - 0.5) * 0.04,
+      ph: rand() * 6.28, a: 0.9,
+      col: rand() > 0.5 ? '210,25,60' : '170,10,40'
+    });
+  }
+  for (let i = petals.length - 1; i >= 0; i--) {
+    const p = petals[i];
+    p.y += p.vy; p.rot += p.rs;
+    p.x += Math.sin(t * 0.002 + p.ph) * 0.6;
+    if (p.y > groundY) { p.a -= 0.02; if (p.a <= 0) { petals.splice(i, 1); continue; } }
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.scale(1, 0.65 + 0.35 * Math.sin(t * 0.004 + p.ph));
+    ctx.fillStyle = `rgba(${p.col},${p.a})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, p.size * 1.5, p.size, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+/* ---------- События ---------- */
+window.addEventListener('pointermove', e => { pointer = { x: e.clientX, y: e.clientY }; });
+window.addEventListener('pointerdown', e => { pointer = { x: e.clientX, y: e.clientY }; });
+window.addEventListener('pointerup', e => { if (e.pointerType !== 'mouse') pointer = null; });
+window.addEventListener('pointerleave', () => { pointer = null; });
+
+let rt, lastW = window.innerWidth, lastH = window.innerHeight;
+window.addEventListener('resize', () => {
+  clearTimeout(rt);
+  rt = setTimeout(() => {
+    if (window.innerWidth !== lastW || Math.abs(window.innerHeight - lastH) > 120) {
+      lastW = window.innerWidth; lastH = window.innerHeight;
+      setup();
+    }
+  }, 250);
+});
+
+setup();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
